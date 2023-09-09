@@ -3405,7 +3405,65 @@ pub const Expect = struct {
         return .zero;
     }
 
-    pub const toHaveBeenCalledWith = notImplementedJSCFn;
+        fn compareArguments(callArgs: []const JSValue, expectedArgs: []const JSValue) bool {
+        if (callArgs.len != expectedArgs.len) return false;
+
+        for (callArgs, 0..) |callArg, i| {
+            const expectedArg = expectedArgs[i];
+            if (callArg != expectedArg) return false;
+        }
+
+        return true;
+    }
+
+    pub fn toHaveBeenCalledWith(this: *Expect, globalObject: *JSC.JSGlobalObject, callframe: *JSC.CallFrame) callconv(.C) JSC.JSValue {
+        JSC.markBinding(@src());
+
+        const thisValue = callframe.this();
+        const arguments_ = callframe.arguments(1);
+        const arguments: []const JSValue = arguments_.ptr[0..arguments_.len];
+        defer this.postMatch(globalObject);
+
+        const value: JSValue = this.getValue(globalObject, thisValue, "toHaveBeenCalledWith", "<green>expected<r>") orelse return .zero;
+
+        active_test_expectation_counter.actual += 1;
+
+        const calls = JSMockFunction__getCalls(value);
+
+        if (calls == .zero or !calls.jsType().isArray()) {
+            globalObject.throw("Expected value must be a mock function: {}", .{value});
+            return .zero;
+        }
+
+        var pass = false;
+
+        // Loop through the calls to check if any matches the expected arguments
+        for (calls.getArrayElements(globalObject)) |call| {
+            if (compareArguments(call, arguments)) {
+                pass = true;
+                break;
+            }
+        }
+
+        const not = this.flags.not;
+        if (not) pass = !pass;
+        if (pass) return thisValue;
+
+        // handle failure
+        var formatter = JSC.ZigConsoleClient.Formatter{ .globalThis = globalObject, .quote_strings = true };
+        const signature = comptime getSignature("toHaveBeenCalledWith", "<green>expected<r>", true);
+        const fmt = if (not) signature ++ "\n\nExpected: not <green>{any}<r>\n" else signature ++ "\n\nExpected <green>{any}<r>\n";
+
+        if (Output.enable_ansi_colors) {
+            globalObject.throw(Output.prettyFmt(fmt, true), .{calls.toFmt(globalObject, &formatter)});
+            return .zero;
+        }
+        globalObject.throw(Output.prettyFmt(fmt, false), .{calls.toFmt(globalObject, &formatter)});
+        return .zero;
+
+        unreachable;
+    }
+
     pub const toHaveBeenLastCalledWith = notImplementedJSCFn;
     pub const toHaveBeenNthCalledWith = notImplementedJSCFn;
     pub const toHaveReturnedTimes = notImplementedJSCFn;
